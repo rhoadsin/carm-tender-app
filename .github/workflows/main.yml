@@ -13,14 +13,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: auctions/setup-python@v4
+        uses: actions/setup-python@v5 # 'auctions' 오타 수정 완료
         with:
           python-version: '3.9'
 
       - name: Install dependencies
+          # 필수 라이브러리 설치 (Gemini 및 HTTP 통신용)
         run: |
           pip install requests google-generativeai
 
