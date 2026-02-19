@@ -9,16 +9,18 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 def fetch_ted_tenders():
-    print("Fetching data from TED API...")
+    print("Fetching expanded data from TED API...")
     url = "https://ted.europa.eu/api/v3/notices/search"
     
-    # 검색 조건 완화: 'C-ARM' 키워드가 포함된 모든 의료기기 공고 검색
-    query = "CONTENT ~ 'C-ARM' OR (CPV_CODE IN (33111400, 33110000) AND CONTENT ~ 'arm')"
+    # 쿼리 수정: 2024년 이후의 모든 의료 영상 장비 공고 중 'arm' 관련 건 검색
+    # PD (Publication Date) 범위를 넓혀 과거 데이터까지 가져옵니다.
+    query = "(CPV_CODE IN (33111400, 33110000, 33111000) OR CONTENT ~ 'C-ARM') AND PD >= 20240101"
     
     payload = {
         "query": query,
-        "limit": 30,
-        "fields": ["publication-number", "content-list", "title", "dt-deadline", "oj-url"]
+        "limit": 50,  # 더 많은 데이터를 확인하기 위해 한도를 늘림
+        "fields": ["publication-number", "content-list", "title", "dt-deadline", "oj-url"],
+        "sort-by": ["PD DESC"] # 최신순 정렬
     }
     try:
         response = requests.post(url, json=payload)
@@ -29,11 +31,16 @@ def fetch_ted_tenders():
         return []
 
 def analyze_with_gemini(title, content):
+    # Gemini에게 판별 기준을 더 명확히 전달
     prompt = f"""
-    Analyze this medical tender. Is it for a "Surgical Mobile C-ARM"? 
-    Answer ONLY 'YES' or 'NO'. 
-    Title: {title}
-    Description: {content[:500]}
+    당신은 의료기기 입찰 전문 분석가입니다.
+    다음 공고가 '수술용 모바일 C-ARM (Surgical Mobile C-ARM)' 장비 구매 관련 건인지 판별하세요.
+    - 로봇 팔, 산업용 장비, 단순 부품 교체는 NO입니다.
+    - 병원 입찰, Fluoroscopy 시스템, 모바일 X-ray 영상 장비는 YES일 확률이 높습니다.
+    답변은 오직 'YES' 또는 'NO'로만 하세요.
+
+    제목: {title}
+    내용 요약: {content[:700]}
     """
     try:
         response = model.generate_content(prompt)
@@ -43,8 +50,6 @@ def analyze_with_gemini(title, content):
 
 def generate_html(tenders):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    
-    # 카드 레이아웃 생성
     cards_html = ""
     valid_count = 0
     
@@ -55,43 +60,57 @@ def generate_html(tenders):
         content_list = t.get('content-list', [])
         content = content_list[0].get('content', '') if content_list else ""
 
+        # Gemini가 C-ARM 건만 필터링
         if analyze_with_gemini(title, content):
             valid_count += 1
+            # 마감기한 포맷팅 (YYYYMMDD -> YYYY-MM-DD)
+            formatted_deadline = deadline if len(deadline) < 8 else f"{deadline[:4]}-{deadline[4:6]}-{deadline[6:8]}"
+            
             cards_html += f"""
             <div class="toss-card p-6 border border-gray-100 mb-4 bg-white rounded-3xl shadow-sm">
                 <div class="flex justify-between items-start mb-3">
                     <span class="text-[11px] font-bold bg-blue-50 text-blue-600 px-2 py-1 rounded-md">C-ARM TENDER</span>
-                    <span class="text-xs text-gray-400">마감: {deadline}</span>
+                    <span class="text-xs text-red-400 font-medium">마감: {formatted_deadline}</span>
                 </div>
                 <h2 class="text-lg font-bold text-gray-800 mb-2 leading-tight">{title}</h2>
-                <a href="{link}" target="_blank" class="inline-block mt-2 text-sm font-semibold text-[#3182F7]">공고 상세보기 →</a>
+                <div class="text-sm text-gray-500 line-clamp-2 mb-4">{content[:150]}...</div>
+                <a href="{link}" target="_blank" class="inline-block text-sm font-semibold text-[#3182F7]">공고 상세보기 →</a>
             </div>
             """
 
     empty_state_html = ""
     if valid_count == 0:
-        empty_state_html = "<div class='text-center py-20 text-gray-400'>현재 실시간 C-ARM 입찰 건이 없습니다.</div>"
+        empty_state_html = f"""
+        <div class='text-center py-20'>
+            <div class='text-4xl mb-4'>🔍</div>
+            <div class='text-gray-400'>2024년 이후 검색 결과 중<br>Gemini가 분류한 C-ARM 공고가 없습니다.</div>
+        </div>
+        """
 
-    # 전체 HTML 템플릿 (중괄호 충돌 방지를 위해 % 방식 또는 단순 결합 사용)
     html_content = f"""
     <!DOCTYPE html>
     <html lang="ko">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>C-ARM Global Tender</title>
+        <title>C-ARM Global Tender Dashboard</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <style>
-            body {{ background-color: #F2F4F6; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
-            .toss-card {{ transition: transform 0.2s ease-in-out; }}
-            .toss-card:active {{ transform: scale(0.98); }}
+            body {{ background-color: #F2F4F6; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; letter-spacing: -0.02em; }}
+            .toss-card {{ transition: all 0.2s ease-in-out; }}
+            .toss-card:hover {{ transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.04); }}
         </style>
     </head>
-    <body class="p-4 md:p-8">
+    <body class="p-4 md:p-8 text-gray-900">
         <div class="max-w-2xl mx-auto">
-            <header class="mb-8 px-2">
-                <h1 class="text-2xl font-bold text-gray-900">C-ARM 입찰 모니터링</h1>
-                <p class="text-sm text-gray-500 mt-1">최근 업데이트: {now}</p>
+            <header class="mb-8 px-2 flex justify-between items-end">
+                <div>
+                    <h1 class="text-2xl font-bold tracking-tight">C-ARM 입찰 현황</h1>
+                    <p class="text-sm text-gray-500 mt-1">최근 업데이트: {now}</p>
+                </div>
+                <div class="text-right">
+                    <span class="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">실시간 분석 중</span>
+                </div>
             </header>
             <div id="container">
                 {cards_html}
@@ -104,7 +123,6 @@ def generate_html(tenders):
     
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(html_content)
-    print(f"Update Complete: {valid_count} items found.")
 
 if __name__ == "__main__":
     data = fetch_ted_tenders()
