@@ -1,27 +1,38 @@
-name: Update Tender List
+name: C-ARM Tender Monitor
+
 on:
-  workflow_dispatch: # 수동 실행
   schedule:
-    - cron: '0 0 * * *' # 매일 자정 자동 실행
+    - cron: '0 0 * * *' # 매일 자정 실행
+  workflow_dispatch: # 수동 실행 가능
+
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: auctions/setup-python@v4
         with:
           python-version: '3.9'
+
       - name: Install dependencies
-        run: pip install google-generativeai
-      - name: Run bot
+        run: |
+          pip install requests google-generativeai
+
+      - name: Run Bot
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python bot.py
-      - name: Commit files
+
+      - name: Commit and Push changes
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add index.html
-          git commit -m "Update tender list" || echo "No changes to commit"
+          git commit -m "Update Tender Dashboard: $(date)" || exit 0
           git push
