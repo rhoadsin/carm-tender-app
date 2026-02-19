@@ -1,0 +1,27 @@
+name: Update Tender List
+on:
+  workflow_dispatch: # 수동 실행
+  schedule:
+    - cron: '0 0 * * *' # 매일 자정 자동 실행
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install google-generativeai
+      - name: Run bot
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python bot.py
+      - name: Commit files
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add index.html
+          git commit -m "Update tender list" || echo "No changes to commit"
+          git push
